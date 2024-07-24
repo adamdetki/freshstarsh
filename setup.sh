@@ -1,32 +1,63 @@
 #!/bin/bash
 
+#TODO: Decide whether or not to use snap packages or not
+#TODO: Add in neovim to the apps, make sure it's version 0.10.0
+#TODO: Add in postman or fix
+#TODO: Move success and failed messages to the end of the run of this script, so user can see what failed.
+
 # For configuring git
 read -p "Enter your git name: " git_name
 read -p "Enter your git email: " git_email
+
+# Initialize status messages
+status_messages=()
+
+# Arrays for packages to install
+snap_packages=("postman" "nvim --classic")
+flatpak_packages=("com.getpostman.Postman" "io.neovim.nvim")
 
 # Function to install a package if it's not already installed
 install_if_not_installed() {
   if ! dpkg -s "$1" &>/dev/null; then
     if sudo apt-get install -y "$1"; then
-      echo "$1 installation succeeded"
+      status_messages+=("$1 installation succeeded")
     else
-      echo "$1 installation failed"
+      status_messages+=("$1 installation failed")
     fi
   else
-    echo "$1 is already installed"
+    status_messages+=("$1 is already installed")
   fi
+}
+
+# Function to install packages using Snap
+install_snap_packages() {
+  for package in "${snap_packages[@]}"; do
+    echo "Installing $package via Snap..."
+    sudo snap install $package
+    status_messages+=("$package installed via Snap.")
+  done
+}
+
+# Function to install packages using Flatpak
+install_flatpak_packages() {
+  for package in "${flatpak_packages[@]}"; do
+    echo "Installing $package via Flatpak..."
+    flatpak install -y flathub $package
+    status_messages+=("$package installed via Flatpak.")
+  done
 }
 
 # Update and upgrade the system
 if sudo apt-get update && sudo apt-get upgrade -y; then
-  echo "System update and upgrade succeeded"
+  status_messages+=("System update and upgrade succeeded")
 else
-  echo "System update and upgrade failed"
+  status_messages+=("System update and upgrade failed")
 fi
 
 # Install necessary packages
 packages=(
   curl
+  unzip
   git
   bat
   ripgrep
@@ -37,7 +68,6 @@ packages=(
   gnome-tweaks
   taskwarrior
   vim
-  neovim
   tmux
   lazygit
   docker.io
@@ -51,11 +81,58 @@ for package in "${packages[@]}"; do
   install_if_not_installed "$package"
 done
 
+# Check for Snap and Flatpak, install Flatpak if neither is installed
+if ! command -v snap &>/dev/null; then
+  if ! command -v flatpak &>/dev/null; then
+    echo "Flatpak not found. Installing Flatpak..."
+    sudo apt-get update && sudo apt-get install -y flatpak
+    status_messages+=("Flatpak installed.")
+  else
+    status_messages+=("Flatpak already installed.")
+  fi
+else
+  status_messages+=("Snap already installed.")
+fi
+
+# Install Oh My Zsh
+if [ ! -d "$HOME/.oh-my-zsh" ]; then
+  if sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"; then
+    status_messages+=("Oh My Zsh installation succeeded")
+  else
+    status_messages+=("Oh My Zsh installation failed")
+  fi
+else
+  status_messages+=("Oh My Zsh is already installed")
+fi
+
+# Change default shell to zsh
+if chsh -s "$(which zsh)"; then
+  status_messages+=("Default shell changed to zsh successfully")
+else
+  status_messages+=("Failed to change default shell to zsh")
+fi
+
+# Reload .zshrc to apply fnm configuration in the current session
+if source ~/.zshrc; then
+  status_messages+=(".zshrc reloaded successfully")
+else
+  status_messages+=("Failed to reload .zshrc")
+fi
+
+# Install Postman and Neovim based on Snap or Flatpak availability
+if command -v snap &>/dev/null; then
+  install_snap_packages
+elif command -v flatpak &>/dev/null; then
+  install_flatpak_packages
+else
+  status_messages+=("Neither Snap nor Flatpak are installed. Postman and Neovim installation skipped.")
+fi
+
 # Install fnm (Node.js version manager)
 if curl -fsSL https://fnm.vercel.app/install | bash; then
-  echo "fnm installation succeeded"
+  status_messages+=("fnm installation succeeded")
 else
-  echo "fnm installation failed"
+  status_messages+=("fnm installation failed")
 fi
 
 # Add fnm initialization to .zshrc
@@ -65,70 +142,52 @@ if cat <<'EOF' >>~/.zshrc; then
 export PATH="$HOME/.fnm:$PATH"
 eval "$(fnm env)"
 EOF
-  echo "Added fnm initialization to .zshrc"
+  status_messages+=("Added fnm initialization to .zshrc")
 else
-  echo "Failed to add fnm initialization to .zshrc"
+  status_messages+=("Failed to add fnm initialization to .zshrc")
 fi
 
 # Reload .zshrc to apply fnm configuration in the current session
 if source ~/.zshrc; then
-  echo ".zshrc reloaded successfully"
+  status_messages+=(".zshrc reloaded successfully")
 else
-  echo "Failed to reload .zshrc"
+  status_messages+=("Failed to reload .zshrc")
 fi
 
 # Set default Node.js version
 if fnm install 20 && fnm default 20; then
-  echo "Node.js installation and default setting succeeded"
+  status_messages+=("Node.js installation and default setting succeeded")
 else
-  echo "Node.js installation and default setting failed"
-fi
-
-# Install Oh My Zsh
-if [ ! -d "$HOME/.oh-my-zsh" ]; then
-  if sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)"; then
-    echo "Oh My Zsh installation succeeded"
-  else
-    echo "Oh My Zsh installation failed"
-  fi
-else
-  echo "Oh My Zsh is already installed"
-fi
-
-# Change default shell to zsh
-if chsh -s "$(which zsh)"; then
-  echo "Default shell changed to zsh successfully"
-else
-  echo "Failed to change default shell to zsh"
+  status_messages+=("Node.js installation and default setting failed")
 fi
 
 # Set default terminal to kitty
 if sudo update-alternatives --set x-terminal-emulator /usr/bin/kitty; then
-  echo "Default terminal set to kitty successfully"
+  status_messages+=("Default terminal set to kitty successfully")
 else
-  echo "Failed to set default terminal to kitty"
+  status_messages+=("Failed to set default terminal to kitty")
 fi
 
 # Configure git
 if git config --global user.name "$git_name" && git config --global user.email "$git_email"; then
-  echo "Git configured successfully"
+  status_messages+=("Git configured successfully")
 else
-  echo "Failed to configure git"
+  status_messages+=("Failed to configure git")
 fi
 
 # Update tldr
 if tldr --update; then
-  echo "tldr updated successfully"
+  status_messages+=("tldr updated successfully")
 else
-  echo "Failed to update tldr"
+  status_messages+=("Failed to update tldr")
 fi
 
 # Download and install JetBrainsMono Nerd Font
 font_dir="$HOME/.local/share/fonts"
 if mkdir -p "$font_dir" && curl -fLo "$font_dir/JetBrainsMono.zip" https://github.com/ryanoasis/nerd-fonts/releases/download/v2.1.0/JetBrainsMono.zip && unzip "$font_dir/JetBrainsMono.zip" -d "$font_dir" && fc-cache -fv; then
-  echo "JetBrainsMono Nerd Font installed successfully"
+  status_messages+=("JetBrainsMono Nerd Font installed successfully")
 else
-  echo "Failed to install JetBrainsMono Nerd Font"
+  status_messages+=("Failed to install JetBrainsMono Nerd Font")
 fi
 
 # Add font configuration to kitty
@@ -138,23 +197,29 @@ font_family JetBrainsMono Nerd Font
 #mouse_map right press grabbed,ungrabbed no-op
 #mouse_map right click grabbed,ungrabbed paste_from_clipboard
 EOF
-  echo "Added font configuration to kitty successfully"
+  status_messages+=("Added font configuration to kitty successfully")
 else
-  echo "Failed to add font configuration to kitty"
+  status_messages+=("Failed to add font configuration to kitty")
 fi
 
 # Install Postman
 if sudo snap install postman; then
-  echo "Postman installed successfully"
+  status_messages+=("Postman installed successfully")
 else
-  echo "Failed to install Postman"
+  status_messages+=("Failed to install Postman")
 fi
 
 # Download and install LazyVim from the adamdetki/nvim repository
 if git clone https://github.com/adamdetki/nvim ~/.config/nvim; then
-  echo "LazyVim installed successfully from adamdetki/nvim"
+  status_messages+=("LazyVim installed successfully from adamdetki/nvim")
 else
-  echo "Failed to install LazyVim from adamdetki/nvim"
+  status_messages+=("Failed to install LazyVim from adamdetki/nvim")
 fi
+
+# Display status messages
+echo "---- Setup Summary ----"
+for message in "${status_messages[@]}"; do
+  echo "$message"
+done
 
 echo "Setup is complete! Please restart your terminal with 'source ~/.zshrc' to apply all changes."
